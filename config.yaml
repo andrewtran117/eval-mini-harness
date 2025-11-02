@@ -1,8 +1,8 @@
 endpoint:
-  base_url: "http://localhost:8000/v1"
+  base_url: "http://localhost:11434/v1"
   api_key: "dummy"
 
-model: "mistralai/Mistral-7B-Instruct"
+model: "mistral:7b"
 
 sampling:
   temperature: 0.0
@@ -13,7 +13,7 @@ run:
   seed: 7
   dataset: "data/smoke.csv"
   output_dir: "reports"
-  run_name: "mistral7b_fp16_bs64"
+  run_name: "mistral7b_ollama"
   parallelism: 8
 
 scoring:
