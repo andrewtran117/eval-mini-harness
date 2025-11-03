@@ -57,16 +57,15 @@ def _validate_config(config: Dict[str, Any]) -> None:
     Raises:
         ConfigError: If required fields are missing
     """
-    required_sections = ["endpoint", "model", "sampling", "run"]
+    # Validate model field
+    if "model" not in config:
+        raise ConfigError("Missing required field: model")
 
+    # Validate required sections
+    required_sections = ["sampling", "run"]
     for section in required_sections:
         if section not in config:
             raise ConfigError(f"Missing required section: {section}")
-
-    # Validate endpoint section
-    endpoint = config["endpoint"]
-    if "base_url" not in endpoint:
-        raise ConfigError("Missing endpoint.base_url")
 
     # Validate run section
     run = config["run"]
@@ -81,16 +80,6 @@ def _validate_config(config: Dict[str, Any]) -> None:
         raise ConfigError("Missing sampling.temperature")
     if "max_tokens" not in sampling:
         raise ConfigError("Missing sampling.max_tokens")
-
-
-def get_endpoint_url(config: Dict[str, Any]) -> str:
-    """Extract endpoint base URL from config."""
-    return config["endpoint"]["base_url"]
-
-
-def get_api_key(config: Dict[str, Any]) -> Optional[str]:
-    """Extract API key from config (may be None)."""
-    return config["endpoint"].get("api_key")
 
 
 def get_model_name(config: Dict[str, Any]) -> str:
