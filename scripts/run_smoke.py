@@ -80,6 +80,11 @@ def run_smoke_tests(config: dict) -> dict:
             status = "PASS" if ok else "FAIL"
             print(f"  [{status}] {reason}")
 
+            # Show response on failure for debugging
+            if not ok:
+                response_preview = response_text[:100].replace('\n', ' ')
+                print(f"  Response: \"{response_preview}{'...' if len(response_text) > 100 else ''}\")")
+
             # Collect result
             result = {
                 "id": case_id,
