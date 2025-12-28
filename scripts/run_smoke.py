@@ -6,6 +6,7 @@ Loads config + dataset, orchestrates requests, collects metrics, renders report.
 """
 
 import argparse
+import asyncio
 import sys
 import json
 import time
@@ -21,6 +22,7 @@ from evals.config import (
     get_model_name,
     get_dataset_path,
     get_output_dir,
+    get_parallelism,
 )
 from evals.dataset import load_dataset, get_test_case_count, DatasetError
 from evals.client import run_inference, test_connection, ClientError
@@ -28,9 +30,75 @@ from evals.scorers import score_response
 from evals.metrics import calculate_summary_stats, get_failed_tests
 
 
-def run_smoke_tests(config: dict) -> dict:
+async def _run_single_test(
+    config: dict,
+    test_case: dict,
+    case_index: int,
+    total: int,
+    semaphore: asyncio.Semaphore,
+) -> dict:
     """
-    Run smoke tests against Ollama.
+    Run a single test case with bounded concurrency.
+
+    Uses a semaphore to limit concurrent calls; offloads the synchronous
+    Ollama client to a thread via asyncio.to_thread.
+    """
+    case_id = test_case.get("id", case_index)
+    prompt = test_case["prompt"]
+    logs = []
+
+    async with semaphore:
+        logs.append(f"\n[{case_index}/{total}] Test case {case_id}")
+        logs.append(f"  Prompt: {prompt[:60]}{'...' if len(prompt) > 60 else ''}")
+
+        try:
+            # Run inference in a worker thread to avoid blocking the event loop
+            response_text, metrics = await asyncio.to_thread(run_inference, config, prompt)
+            logs.append(f"  Latency: {metrics['latency_s']:.2f}s")
+
+            # Score response
+            ok, reason = score_response(response_text, test_case)
+            status = "PASS" if ok else "FAIL"
+            logs.append(f"  [{status}] {reason}")
+
+            # Show response on failure for debugging
+            if not ok:
+                response_preview = response_text[:100].replace('\n', ' ')
+                logs.append(f"  Response: \"{response_preview}{'...' if len(response_text) > 100 else ''}\")")
+
+            result = {
+                "id": case_id,
+                "prompt": prompt,
+                "response": response_text,
+                "ok": ok,
+                "reason": reason,
+                "tags": test_case.get("tags", []),
+                **metrics,
+            }
+        except ClientError as e:
+            print(f"  Client error: {e}")
+            result = {
+                "id": case_id,
+                "prompt": prompt,
+                "response": None,
+                "ok": False,
+                "reason": f"Client error: {e}",
+                "tags": test_case.get("tags", []),
+                "latency_s": None,
+                "ttft_ms": None,
+                "tokens_in": None,
+                "tokens_out": None,
+            }
+
+    # Preserve original ordering by including index for later sort
+    result["_index"] = case_index
+    result["_logs"] = logs
+    return result
+
+
+async def run_smoke_tests_async(config: dict) -> dict:
+    """
+    Run smoke tests against Ollama with async bounded concurrency.
 
     Args:
         config: Configuration dictionary
@@ -59,59 +127,28 @@ def run_smoke_tests(config: dict) -> dict:
 
     # Run tests
     print(f"\nRunning smoke tests...")
-    results = []
+    parallelism = max(1, get_parallelism(config))
     total = len(test_cases)
 
-    for i, test_case in enumerate(test_cases, 1):
-        case_id = test_case.get("id", i)
-        prompt = test_case["prompt"]
+    semaphore = asyncio.Semaphore(parallelism)
+    tasks = [
+        asyncio.create_task(_run_single_test(config, test_case, i, total, semaphore))
+        for i, test_case in enumerate(test_cases, 1)
+    ]
 
-        # Show progress
-        print(f"\n[{i}/{total}] Test case {case_id}")
-        print(f"  Prompt: {prompt[:60]}{'...' if len(prompt) > 60 else ''}")
+    # Gather results and restore original order
+    raw_results = await asyncio.gather(*tasks)
+    results_sorted = sorted(raw_results, key=lambda x: x["_index"])
 
-        try:
-            # Run inference
-            response_text, metrics = run_inference(config, prompt)
-            print(f"  Latency: {metrics['latency_s']:.2f}s")
+    # Emit logs in order to avoid interleaving noise
+    for r in results_sorted:
+        for line in r.pop("_logs", []):
+            print(line)
 
-            # Score response
-            ok, reason = score_response(response_text, test_case)
-            status = "PASS" if ok else "FAIL"
-            print(f"  [{status}] {reason}")
-
-            # Show response on failure for debugging
-            if not ok:
-                response_preview = response_text[:100].replace('\n', ' ')
-                print(f"  Response: \"{response_preview}{'...' if len(response_text) > 100 else ''}\")")
-
-            # Collect result
-            result = {
-                "id": case_id,
-                "prompt": prompt,
-                "response": response_text,
-                "ok": ok,
-                "reason": reason,
-                "tags": test_case.get("tags", []),
-                **metrics,
-            }
-            results.append(result)
-
-        except ClientError as e:
-            print(f"  Client error: {e}")
-            result = {
-                "id": case_id,
-                "prompt": prompt,
-                "response": None,
-                "ok": False,
-                "reason": f"Client error: {e}",
-                "tags": test_case.get("tags", []),
-                "latency_s": None,
-                "ttft_ms": None,
-                "tokens_in": None,
-                "tokens_out": None,
-            }
-            results.append(result)
+    results = []
+    for r in results_sorted:
+        r.pop("_index", None)
+        results.append(r)
 
     return {
         "config": {
@@ -122,6 +159,11 @@ def run_smoke_tests(config: dict) -> dict:
         "timestamp": datetime.now().isoformat(),
         "results": results,
     }
+
+
+def run_smoke_tests(config: dict) -> dict:
+    """Synchronous wrapper to run async tests."""
+    return asyncio.run(run_smoke_tests_async(config))
 
 
 def display_summary(run_data: dict):
