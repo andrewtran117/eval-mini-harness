@@ -36,6 +36,8 @@ def load_dataset(csv_path: str) -> List[Dict[str, Any]]:
         - expect_number: Expected numeric answer (optional, float)
         - tolerance: Tolerance for numeric comparison (optional, float)
         - tags: Semicolon-separated tags (optional)
+        - use_llm_judge: Whether to use LLM judge scoring (optional, bool)
+        - judge_instructions: Extra guidance for the judge (optional, string)
     """
     path = Path(csv_path)
 
@@ -98,6 +100,8 @@ def _parse_row(row: Dict[str, str], row_num: int) -> Dict[str, Any]:
         "expect_number": _parse_float(row.get("expect_number")),
         "tolerance": _parse_float(row.get("tolerance")),
         "tags": _parse_semicolon_list(row.get("tags")),
+        "use_llm_judge": _parse_bool(row.get("use_llm_judge")),
+        "judge_instructions": _parse_optional_string(row.get("judge_instructions")),
     }
 
     return case

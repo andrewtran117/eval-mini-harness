@@ -1,0 +1,39 @@
+# Smoke Test Report
+
+**Model:** {{ model }}  
+**Dataset:** {{ dataset }}  
+**Run name:** {{ run_name or "n/a" }}  
+**Timestamp:** {{ timestamp }}
+
+## Summary
+- Total: {{ stats.total_tests }}
+- Passed: {{ stats.passed }} ({{ "%.1f"|format(stats.pass_rate) }}%)
+- Failed: {{ stats.failed }}
+{% if stats.latency.mean %}
+- Latency p50/p95: {{ "%.2f"|format(stats.latency.p50) }}s / {{ "%.2f"|format(stats.latency.p95) }}s
+{% endif %}
+{% if stats.tokens_per_sec %}
+- Throughput: {{ "%.1f"|format(stats.tokens_per_sec) }} tokens/sec
+{% endif %}
+
+## Results by Tag
+{% if stats.by_tag %}
+Tag | Pass Rate | Passed/Total
+--- | --- | ---
+{% for tag, t in stats.by_tag.items() %}
+{{ tag }} | {{ "%.1f"|format(t.pass_rate) }}% | {{ t.passed }}/{{ t.total }}
+{% endfor %}
+{% else %}
+(no tags)
+{% endif %}
+
+## Failed Tests
+{% if failed %}
+{% for r in failed %}
+- **{{ r.id }}** — {{ r.prompt[:120] }}  
+  Reason: {{ r.reason }}  
+  {% if r.response %}Response: {{ r.response[:400].replace("\n", " ") }}{% else %}(no response){% endif %}
+{% endfor %}
+{% else %}
+No failures 🎉
+{% endif %}

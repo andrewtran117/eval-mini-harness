@@ -6,7 +6,7 @@ Supports: regex, keyword matching, JSON validation, numeric tolerance.
 
 import re
 import json
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Dict, Any, Tuple, List, Optional, Callable
 from pathlib import Path
 
 
@@ -164,11 +164,35 @@ def score_number(response: str, target: float, tolerance: float = 0.0) -> Tuple[
         return False, f"Could not parse numbers in response (expected {target})"
 
 
-def score_response(response: str, test_case: Dict[str, Any]) -> Tuple[bool, str]:
+def score_llm_judge(
+    response: str,
+    test_case: Dict[str, Any],
+    judge_fn: Callable[[Dict[str, Any], str, str], Tuple[bool, str]]
+) -> Tuple[bool, str]:
+    """
+    Evaluate response using an LLM judge callable.
+
+    judge_fn should accept (test_case, prompt, response) and return (ok, reason).
+    """
+    if not judge_fn:
+        return False, "LLM judge not configured"
+    try:
+        return judge_fn(test_case, test_case["prompt"], response)
+    except Exception as e:
+        return False, f"LLM judge error: {e}"
+
+
+def score_response(
+    response: str,
+    test_case: Dict[str, Any],
+    use_llm_judge: bool = False,
+    judge_fn: Optional[Callable[[Dict[str, Any], str, str], Tuple[bool, str]]] = None,
+) -> Tuple[bool, str]:
     """
     Score a response against a test case using the appropriate scorer.
 
     Applies scorers in order of precedence:
+    0. LLM judge (if enabled)
     1. expect_regex
     2. expect_number
     3. expect_json
@@ -181,6 +205,10 @@ def score_response(response: str, test_case: Dict[str, Any]) -> Tuple[bool, str]
     Returns:
         Tuple of (pass/fail, reason)
     """
+    # LLM judge if requested
+    if use_llm_judge:
+        return score_llm_judge(response, test_case, judge_fn)  # type: ignore[arg-type]
+
     # Try regex first
     if test_case.get("expect_regex"):
         return score_regex(response, test_case["expect_regex"])
