@@ -1,4 +1,4 @@
-model: "llama3.1:8b-instruct-q4_K_M"
+model: "qwen2.5:7b-instruct"
 
 sampling:
   temperature: 0.0
@@ -9,7 +9,7 @@ run:
   seed: 7
   dataset: "data/xstest_full.csv"
   output_dir: "reports"
-  run_name: "xstest_llama31_8b_q4km"
+  run_name: "ans_qwen25_7b"
   parallelism: 8
 
 scoring:

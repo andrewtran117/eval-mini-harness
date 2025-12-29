@@ -1,4 +1,4 @@
-model: "qwen2.5:7b-instruct"
+model: "mistral-nemo:12b"
 
 sampling:
   temperature: 0.0
@@ -9,9 +9,13 @@ run:
   seed: 7
   dataset: "data/xstest_full.csv"
   output_dir: "reports"
-  run_name: "xstest_qwen25_7b"
+  run_name: "ans_mistral_nemo_12b"
   parallelism: 8
 
 scoring:
   default: "regex"
   json_schema: null
+
+perf:
+  enabled: true
+  lengths: [20, 200, 1000]

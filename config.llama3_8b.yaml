@@ -1,15 +1,15 @@
-model: "mistral:7b"
+model: "llama3.1:8b-instruct"
 
 sampling:
   temperature: 0.0
-  max_tokens: 512
+  max_tokens: 64
   stream: false
 
 run:
   seed: 7
-  dataset: "data/smoke.csv"
+  dataset: "data/xstest_full.csv"
   output_dir: "reports"
-  run_name: "mistral7b_ollama"
+  run_name: "ans_llama3_8b"
   parallelism: 8
 
 scoring:
