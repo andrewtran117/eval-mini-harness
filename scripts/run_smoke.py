@@ -12,9 +12,12 @@ import json
 import time
 from pathlib import Path
 from datetime import datetime
+from typing import Any, Dict
 
 # Add parent directory to path to import from evals
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from jinja2 import Environment, FileSystemLoader, select_autoescape, TemplateNotFound
 
 from evals.config import (
     load_config,
@@ -28,6 +31,7 @@ from evals.dataset import load_dataset, get_test_case_count, DatasetError
 from evals.client import run_inference, test_connection, ClientError
 from evals.scorers import score_response
 from evals.metrics import calculate_summary_stats, get_failed_tests
+from evals.judge import llm_judge
 
 
 async def _run_single_test(
@@ -36,6 +40,8 @@ async def _run_single_test(
     case_index: int,
     total: int,
     semaphore: asyncio.Semaphore,
+    use_llm_judge_default: bool,
+    judge_fn,
 ) -> dict:
     """
     Run a single test case with bounded concurrency.
@@ -57,14 +63,24 @@ async def _run_single_test(
             logs.append(f"  Latency: {metrics['latency_s']:.2f}s")
 
             # Score response
-            ok, reason = score_response(response_text, test_case)
+            use_judge = test_case.get("use_llm_judge")
+            if use_judge is None:
+                use_judge = use_llm_judge_default
+
+            ok, reason = score_response(
+                response_text,
+                test_case,
+                use_llm_judge=use_judge,
+                judge_fn=judge_fn,
+            )
             status = "PASS" if ok else "FAIL"
             logs.append(f"  [{status}] {reason}")
 
             # Show response on failure for debugging
             if not ok:
-                response_preview = response_text[:100].replace('\n', ' ')
-                logs.append(f"  Response: \"{response_preview}{'...' if len(response_text) > 100 else ''}\")")
+                # Longer preview to help debug regex/format mismatches
+                response_preview = response_text[:300].replace('\n', ' ')
+                logs.append(f"  Response: \"{response_preview}{'...' if len(response_text) > 300 else ''}\")")
 
             result = {
                 "id": case_id,
@@ -130,25 +146,48 @@ async def run_smoke_tests_async(config: dict) -> dict:
     parallelism = max(1, get_parallelism(config))
     total = len(test_cases)
 
+    # Prepare judge callable if configured
+    scoring_cfg = config.get("scoring", {})
+    judge_cfg = scoring_cfg.get("judge", {})
+    default_use_llm_judge = scoring_cfg.get("default") == "llm_judge"
+
+    judge_fn = None
+    if judge_cfg:
+        def judge_fn(test_case, prompt, response):
+            return llm_judge(judge_cfg, test_case, prompt, response)
+
     semaphore = asyncio.Semaphore(parallelism)
     tasks = [
-        asyncio.create_task(_run_single_test(config, test_case, i, total, semaphore))
+        asyncio.create_task(
+            _run_single_test(
+                config,
+                test_case,
+                i,
+                total,
+                semaphore,
+                default_use_llm_judge,
+                judge_fn,
+            )
+        )
         for i, test_case in enumerate(test_cases, 1)
     ]
 
-    # Gather results and restore original order
-    raw_results = await asyncio.gather(*tasks)
-    results_sorted = sorted(raw_results, key=lambda x: x["_index"])
-
-    # Emit logs in order to avoid interleaving noise
-    for r in results_sorted:
-        for line in r.pop("_logs", []):
-            print(line)
-
+    # Gather results; print logs as soon as we can while preserving order
     results = []
-    for r in results_sorted:
-        r.pop("_index", None)
-        results.append(r)
+    buffer = {}
+    next_to_emit = 1
+    for finished in asyncio.as_completed(tasks):
+        r = await finished
+        buffer[r["_index"]] = r
+
+        # Emit in order while contiguous indexes are available
+        while next_to_emit in buffer:
+            current = buffer.pop(next_to_emit)
+            for line in current.pop("_logs", []):
+                print(line)
+            current.pop("_index", None)
+            results.append(current)
+            next_to_emit += 1
 
     return {
         "config": {
@@ -211,21 +250,70 @@ def display_summary(run_data: dict):
 
 
 def save_results(run_data: dict, config: dict):
-    """Save results to JSON file."""
+    """Save results to JSON file and render reports."""
     output_dir = Path(get_output_dir(config))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate filename with timestamp
     run_name = config["run"].get("run_name", "run")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{run_name}_{timestamp}.json"
-    filepath = output_dir / filename
+    base_filename = f"{run_name}_{timestamp}"
+    json_path = output_dir / f"{base_filename}.json"
 
     # Save
-    with open(filepath, "w") as f:
+    with open(json_path, "w") as f:
         json.dump(run_data, f, indent=2)
 
-    print(f"\nResults saved to: {filepath}")
+    print(f"\nResults saved to: {json_path}")
+
+    # Render Markdown and HTML reports if templates exist
+    render_reports(run_data, config, output_dir, base_filename)
+
+
+def _get_template_env() -> Environment:
+    """Return a Jinja2 environment pointing at templates/."""
+    templates_dir = Path(__file__).parent.parent / "templates"
+    return Environment(
+        loader=FileSystemLoader(str(templates_dir)),
+        autoescape=select_autoescape(["html", "xml"]),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+
+
+def render_reports(run_data: Dict[str, Any], config: Dict[str, Any], output_dir: Path, base_filename: str) -> None:
+    """Render Markdown and HTML reports if templates are available."""
+    env = _get_template_env()
+    context = _build_report_context(run_data, config)
+
+    for name, ext in [("report.md.j2", "md"), ("report.html.j2", "html")]:
+        try:
+            template = env.get_template(name)
+        except TemplateNotFound:
+            continue
+
+        output_path = output_dir / f"{base_filename}.{ext}"
+        rendered = template.render(**context)
+        with open(output_path, "w") as f:
+            f.write(rendered)
+        print(f"Report saved to: {output_path}")
+
+
+def _build_report_context(run_data: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+    """Prepare data for templating."""
+    results = run_data["results"]
+    stats = calculate_summary_stats(results)
+    failed = get_failed_tests(results)
+    return {
+        "run": run_data,
+        "config": config,
+        "stats": stats,
+        "failed": failed,
+        "timestamp": run_data.get("timestamp"),
+        "model": run_data.get("config", {}).get("model"),
+        "dataset": get_dataset_path(config),
+        "run_name": config["run"].get("run_name"),
+    }
 
 
 def main():

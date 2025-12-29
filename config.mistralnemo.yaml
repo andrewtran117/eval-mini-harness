@@ -1,0 +1,17 @@
+model: "mistral-nemo:12b"
+
+sampling:
+  temperature: 0.0
+  max_tokens: 64
+  stream: false
+
+run:
+  seed: 7
+  dataset: "data/xstest_full.csv"
+  output_dir: "reports"
+  run_name: "xstest_mistral_nemo_12b"
+  parallelism: 8
+
+scoring:
+  default: "regex"
+  json_schema: null

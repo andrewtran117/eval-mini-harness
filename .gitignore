@@ -26,6 +26,9 @@ reports/
 *.json
 *.csv
 
+# Secrets
+.env
+
 # OS
 .DS_Store
 Thumbs.db

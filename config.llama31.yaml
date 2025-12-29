@@ -1,0 +1,17 @@
+model: "llama3.1:8b-instruct-q4_K_M"
+
+sampling:
+  temperature: 0.0
+  max_tokens: 64
+  stream: false
+
+run:
+  seed: 7
+  dataset: "data/xstest_full.csv"
+  output_dir: "reports"
+  run_name: "xstest_llama31_8b_q4km"
+  parallelism: 8
+
+scoring:
+  default: "regex"
+  json_schema: null
