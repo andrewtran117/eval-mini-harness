@@ -1,4 +1,4 @@
-model: "llama3.1:8b-instruct"
+model: "llama3.1:8b-instruct-q8_0"
 
 sampling:
   temperature: 0.0
