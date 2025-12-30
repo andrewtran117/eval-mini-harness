@@ -196,6 +196,8 @@ def main():
     parser.add_argument("--input", required=True, help="Merged answers JSON/JSONL")
     parser.add_argument("--output", required=True, help="Output JSONL path")
     parser.add_argument("--judges", nargs="+", required=True, help="Judge models (ollama names)")
+    parser.add_argument("--shard_count", type=int, default=1, help="Total number of shards")
+    parser.add_argument("--shard_index", type=int, default=0, help="Zero-based shard index for this run")
     parser.add_argument("--strict_all", action="store_true", default=True, help="Run STRICT pairwise on all items")
     parser.add_argument("--no_strict_all", dest="strict_all", action="store_false", help="Disable strict-all")
     parser.add_argument("--lenient_subset_size", type=int, default=120, help="Subset size for lenient runs")
@@ -206,12 +208,20 @@ def main():
     parser.add_argument("--resume", action="store_true", help="Skip already completed records in output")
     args = parser.parse_args()
 
+    if args.shard_count < 1:
+        raise ValueError("shard_count must be >= 1")
+    if args.shard_index < 0 or args.shard_index >= args.shard_count:
+        raise ValueError("shard_index must be in [0, shard_count)")
+
     merged_path = Path(args.input)
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     items = load_merged(merged_path)
     print(f"Loaded {len(items)} items from {merged_path}")
+    if args.shard_count > 1:
+        items = [item for idx, item in enumerate(items) if idx % args.shard_count == args.shard_index]
+        print(f"Sharding enabled: shard {args.shard_index + 1}/{args.shard_count} -> {len(items)} items")
 
     # Build subset ids for lenient
     ids = [str(item["id"]) for item in items]
