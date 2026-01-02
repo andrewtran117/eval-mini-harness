@@ -1,12 +1,13 @@
 """
 LLM-as-judge helper.
 
-Uses an Ollama model to score whether a response satisfies the prompt/criteria.
+Uses an OpenAI-compatible endpoint (e.g., vLLM) to score whether a response satisfies the prompt/criteria.
 """
 
-from typing import Dict, Tuple
 import textwrap
-import ollama
+from typing import Dict, Tuple
+
+from evals.client import get_client_params, get_openai_client
 
 
 def llm_judge(
@@ -19,8 +20,9 @@ def llm_judge(
     Call an LLM judge to decide pass/fail.
 
     judge_config: expects
-      - model: ollama model name to use
+      - model: model name to use
       - system_prompt: optional system prompt for the judge
+      - base_url/api_key: optional, otherwise falls back to env/DEFAULTS
     """
     model = judge_config.get("model")
     system_prompt = judge_config.get(
@@ -55,16 +57,19 @@ def llm_judge(
         """
     ).strip()
 
-    chat_resp = ollama.chat(
+    base_url, api_key = get_client_params(judge_config)
+    client = get_openai_client({"client": {"base_url": base_url, "api_key": api_key}})
+
+    chat_resp = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
-        options={"temperature": 0},
+        temperature=0,
     )
 
-    verdict = (chat_resp.get("message", {}) or {}).get("content", "").strip().lower()
+    verdict = (chat_resp.choices[0].message.content or "").strip().lower() if chat_resp.choices else ""
     if "yes" in verdict:
         return True, f"LLM judge YES ({model})"
     if "no" in verdict:

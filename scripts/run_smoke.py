@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Main CLI for running smoke tests with Ollama.
+Main CLI for running smoke tests with an OpenAI-compatible endpoint (e.g., vLLM).
 
 Loads config + dataset, orchestrates requests, collects metrics, renders report.
 """
@@ -47,7 +47,7 @@ async def _run_single_test(
     Run a single test case with bounded concurrency.
 
     Uses a semaphore to limit concurrent calls; offloads the synchronous
-    Ollama client to a thread via asyncio.to_thread.
+    client to a thread via asyncio.to_thread.
     """
     case_id = test_case.get("id", case_index)
     prompt = test_case["prompt"]
@@ -114,7 +114,7 @@ async def _run_single_test(
 
 async def run_smoke_tests_async(config: dict) -> dict:
     """
-    Run smoke tests against Ollama with async bounded concurrency.
+    Run smoke tests against an OpenAI-compatible endpoint with async bounded concurrency.
 
     Args:
         config: Configuration dictionary
@@ -132,14 +132,13 @@ async def run_smoke_tests_async(config: dict) -> dict:
         print(f"Dataset error: {e}")
         sys.exit(1)
 
-    # Test Ollama connection
-    print("\nTesting Ollama connection...")
+    # Test connection
+    print("\nTesting model endpoint connection...")
     if not test_connection(config):
-        print("Cannot connect to Ollama")
-        print("  Make sure Ollama is running: ollama serve")
-        print(f"  And model is pulled: ollama pull {get_model_name(config)}")
+        print("Cannot connect to endpoint")
+        print("  Make sure your vLLM/OpenAI-compatible server is reachable and model is loaded")
         sys.exit(1)
-    print(f"Connected to Ollama (model: {get_model_name(config)})")
+    print(f"Connected to endpoint (model: {get_model_name(config)})")
 
     # Run tests
     print(f"\nRunning smoke tests...")
@@ -318,7 +317,7 @@ def _build_report_context(run_data: Dict[str, Any], config: Dict[str, Any]) -> D
 
 def main():
     """Run smoke tests."""
-    parser = argparse.ArgumentParser(description="Run Ollama smoke tests")
+    parser = argparse.ArgumentParser(description="Run smoke tests against an OpenAI-compatible endpoint (e.g., vLLM)")
     parser.add_argument("--config", default="config.yaml", help="Path to config file")
     parser.add_argument("--compare", nargs=2, metavar=("RUN_A", "RUN_B"), help="Compare two run JSON files")
 
@@ -331,7 +330,7 @@ def main():
 
     # Load config
     print("=" * 60)
-    print("OLLAMA SMOKE TEST RUNNER")
+    print("OPENAI-COMPATIBLE SMOKE TEST RUNNER")
     print("=" * 60)
 
     try:
