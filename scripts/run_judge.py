@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from evals.client import get_client_params, get_openai_client
+import ollama
 
 
 SYSTEM_PROMPT = "You are an impartial evaluator. Output ONLY valid JSON. No markdown. No extra text."
@@ -130,30 +130,28 @@ def ensure_candidates(item: Dict[str, Any]) -> Tuple[Dict[str, str], Dict[str, s
     return mapping, texts
 
 
-def call_judge(client, model: str, user_prompt: str, temperature: float, max_tokens: int) -> Tuple[str, float]:
+def call_judge(model: str, user_prompt: str, temperature: float, max_tokens: int) -> Tuple[str, float]:
     start = time.time()
-    resp = client.chat.completions.create(
+    resp = ollama.chat(
         model=model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=temperature,
-        max_tokens=max_tokens,
+        options={"temperature": temperature, "num_predict": max_tokens},
     )
     latency = time.time() - start
-    content = resp.choices[0].message.content if resp.choices else ""
-    return content, latency
+    return resp["message"]["content"], latency
 
 
-def parse_with_retry(client, model: str, prompt: str, temperature: float, max_tokens: int) -> Tuple[Dict[str, Any], str, float, bool]:
-    raw, latency = call_judge(client, model, prompt, temperature, max_tokens)
+def parse_with_retry(model: str, prompt: str, temperature: float, max_tokens: int) -> Tuple[Dict[str, Any], str, float, bool]:
+    raw, latency = call_judge(model, prompt, temperature, max_tokens)
     try:
         parsed = json.loads(raw)
         return parsed, raw, latency, False
     except Exception:
         repair_prompt = raw + "\n\nPrevious output was invalid JSON. Return valid JSON only, repairing if needed."
-        raw2, latency2 = call_judge(client, model, repair_prompt, temperature, max_tokens)
+        raw2, latency2 = call_judge(model, repair_prompt, temperature, max_tokens)
         try:
             parsed = json.loads(raw2)
             return parsed, raw2, latency + latency2, False
@@ -197,9 +195,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run judge stage over merged answers")
     parser.add_argument("--input", required=True, help="Merged answers JSON/JSONL")
     parser.add_argument("--output", required=True, help="Output JSONL path")
-    parser.add_argument("--judges", nargs="+", required=True, help="Judge models (OpenAI/vLLM names)")
-    parser.add_argument("--base_url", default=None, help="OpenAI-compatible base URL (e.g., http://host:8000/v1). Defaults to OPENAI_BASE_URL or http://localhost:8000/v1")
-    parser.add_argument("--api_key", default=None, help="API key for OpenAI-compatible server. Defaults to OPENAI_API_KEY or 'EMPTY'")
+    parser.add_argument("--judges", nargs="+", required=True, help="Judge models (ollama names)")
     parser.add_argument("--shard_count", type=int, default=1, help="Total number of shards")
     parser.add_argument("--shard_index", type=int, default=0, help="Zero-based shard index for this run")
     parser.add_argument("--strict_all", action="store_true", default=True, help="Run STRICT pairwise on all items")
@@ -216,19 +212,6 @@ def main():
         raise ValueError("shard_count must be >= 1")
     if args.shard_index < 0 or args.shard_index >= args.shard_count:
         raise ValueError("shard_index must be in [0, shard_count)")
-
-    client = get_openai_client(
-        {
-            "client": {
-                "base_url": args.base_url,
-                "api_key": args.api_key,
-            }
-        }
-    )
-    resolved_base, resolved_key = get_client_params(
-        {"client": {"base_url": args.base_url, "api_key": args.api_key}}
-    )
-    print(f"Using OpenAI-compatible endpoint: {resolved_base} (api_key set: {'yes' if resolved_key else 'no'})")
 
     merged_path = Path(args.input)
     out_path = Path(args.output)
@@ -286,7 +269,7 @@ def main():
                             cand_texts[rhs],
                         )
                         parsed, raw, latency, parse_error = parse_with_retry(
-                            client, judge_model, user_prompt, args.temperature, args.max_tokens
+                            judge_model, user_prompt, args.temperature, args.max_tokens
                         )
                         rec = {
                             "id": item_id,
@@ -331,7 +314,7 @@ def main():
                             cand_texts[rhs],
                         )
                         parsed, raw, latency, parse_error = parse_with_retry(
-                            client, judge_model, user_prompt, args.temperature, args.max_tokens
+                            judge_model, user_prompt, args.temperature, args.max_tokens
                         )
                         rec = {
                             "id": item_id,

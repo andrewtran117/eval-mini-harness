@@ -1,4 +1,4 @@
-model: "llama3.1:8b-instruct-q8_0"
+model: "qwen2.5:0.5b-instruct"
 
 sampling:
   temperature: 0.0
@@ -9,8 +9,8 @@ run:
   seed: 7
   dataset: "data/xstest_full.csv"
   output_dir: "reports"
-  run_name: "ans_llama3_8b"
-  parallelism: 8
+  run_name: "ans_qwen25_0_5b"
+  parallelism: 4  # adjust if you see OOM; 2–4 is safe for small models
 
 scoring:
   default: "regex"

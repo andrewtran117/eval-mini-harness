@@ -175,4 +175,4 @@ if __name__ == "__main__":
 
     print(f"Loaded {len(cases)} test cases")
     print(f"Saved to: {output_path}")
-    print("\nNow run: python scripts/run_smoke.py --config config.yaml (update run.dataset to the new CSV)")
+    print("\nNow run: python scripts/run_eval.py --config config.yaml (update run.dataset to the new CSV)")
